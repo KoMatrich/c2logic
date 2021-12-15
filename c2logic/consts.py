@@ -46,6 +46,7 @@ condition_ops = {
 	">=": "greaterThanEq"
 }
 unary_ops = {"~": "not"}
+unary_ops_python = {"~" : operator.invert}
 
 binary_op_inverses = {"==": "!=", "!=": "==", "<": ">=", "<=": ">", ">": "<=", ">=": "<"}
 

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pycparser import c_ast, parse_file
 from pycparser.c_ast import (
 	Compound, Constant, DeclList, Enum, FileAST, FuncDecl, Struct, TypeDecl, Typename, BinaryOp as
-	ast_BinaryOp
+	ast_BinaryOp, UnaryOp as ast_UnaryOp
 )
 
-from .consts import func_binary_ops, func_unary_ops, SPECIAL_VARS, binary_ops_python
+from .consts import func_binary_ops, func_unary_ops, SPECIAL_VARS, binary_ops_python, unary_ops_python
 from .instructions import (
 	Instruction,
 	Noop,
@@ -57,10 +57,9 @@ class Variable():
 
 def numify(i):
 	if i.startswith('0x'):
-		return int(i[2:],16)
+		return int(i[2:], 16)
 	else:
 		return int(i)
-
 
 def int_constant_fold(node):
 	if isinstance(node, ast_BinaryOp):
@@ -71,7 +70,8 @@ def int_constant_fold(node):
 		) and left.type == 'int' and right.type == 'int':
 			try:
 				new_constant = Constant(
-					'int', str(int(binary_ops_python[node.op](numify(left.value), numify(right.value))))
+					'int',
+					str(int(binary_ops_python[node.op](numify(left.value), numify(right.value))))
 				)
 				return new_constant
 			except KeyError:
@@ -82,6 +82,17 @@ def int_constant_fold(node):
 			node.left = left
 			node.right = right
 			return node
+	elif isinstance(node, ast_UnaryOp):
+		expr = int_constant_fold(node.expr)
+		if isinstance(expr, Constant) and expr.type == 'int':
+			try:
+				new_constant = Constant(
+					'int', str(int(unary_ops_python[node.op](numify(expr.value))))
+				)
+				return new_constant
+			except KeyError:
+				node.expr = expr
+				return node
 	else:
 		return node
 
