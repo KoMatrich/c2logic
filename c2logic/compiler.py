@@ -32,14 +32,14 @@ from .instructions import (
 class Function():
 	name: str
 	params: list
-	
+
 	instructions: list = dataclasses.field(default_factory=list)
 	locals: list = dataclasses.field(init=False)
 	start: int = dataclasses.field(default=None, init=False)
 	callees: set = dataclasses.field(init=False, default_factory=set)
 	callers: set = dataclasses.field(init=False, default_factory=set)
 	labels: dict = dataclasses.field(init=False, default_factory=dict)
-	
+
 	def __post_init__(self):
 		self.locals = self.params[:]
 
@@ -106,7 +106,7 @@ class Compiler(c_ast.NodeVisitor):
 		self.loops: list = None
 		self.loop_end: int = None
 		self.special_vars: dict = None
-	
+
 	def compile(self, filename: str):
 		self.functions = {}
 		self.curr_function = None
@@ -128,16 +128,20 @@ class Compiler(c_ast.NodeVisitor):
 				preamble = [init_call]
 		else:
 			preamble = [Set("__retaddr_main", "2"), init_call, End()]
-		
+
 		offset = len(preamble)
-		
+
 		#set function starts
 		for function in self.functions.values():
 			function.start = offset
 			offset += len(function.instructions)
-		
+
+		try:
+			init_call.func_start = self.functions["main"].start
+		except KeyError:
+			raise Exception('Missing main function')
+
 		#rewrite relative jumps and func calls
-		init_call.func_start = self.functions["main"].start
 		for function in self.functions.values():
 			instructions = function.instructions
 			for instruction in instructions:
@@ -157,7 +161,7 @@ class Compiler(c_ast.NodeVisitor):
 			"\n".join(map(str, function.instructions)) for function in self.functions.values()
 		)
 		return "\n".join(out)
-	
+
 	def remove_uncalled_funcs(self):
 		to_remove = set()
 		for name, function in list(self.functions.items()):
@@ -169,7 +173,7 @@ class Compiler(c_ast.NodeVisitor):
 				to_remove |= callers
 		for name in to_remove:
 			del self.functions[name]
-	
+
 	def is_called(self, function, callers):
 		if function.name in callers:  #avoid infinite loops
 			return False
@@ -180,27 +184,27 @@ class Compiler(c_ast.NodeVisitor):
 			if self.is_called(self.functions[func_name], callers):
 				return True
 		return False
-	
+
 	#utilities
 	def push(self, instruction: Instruction):
 		self.curr_function.instructions.append(instruction)
-	
+
 	def pop(self):
 		return self.curr_function.instructions.pop()
-	
+
 	def peek(self):
 		return self.curr_function.instructions[-1]
-	
+
 	def curr_offset(self):
 		return len(self.curr_function.instructions) - 1
-	
+
 	def get_varname(self, varname):
 		if varname in self.curr_function.locals:
 			return f"_{varname}_{self.curr_function.name}"
 		elif varname not in self.globals:
 			raise NameError(f"Unknown variable {varname}")
 		return varname
-	
+
 	def get_special_var(self, varname):
 		#avoids special variables clobbering each other
 		if varname not in self.special_vars:
@@ -208,7 +212,7 @@ class Compiler(c_ast.NodeVisitor):
 		self.special_vars[varname] += 1
 		#print(f"create {varname}_{self.special_vars[varname]}")
 		return f"{varname}_{self.special_vars[varname]}"
-	
+
 	def delete_special_var(self, varname):
 		name, _, num = varname.rpartition("_")
 		try:
@@ -220,11 +224,11 @@ class Compiler(c_ast.NodeVisitor):
 			self.special_vars[name] -= 1
 		except (ValueError, KeyError):  # not deleting a special var, this is normal
 			pass
-	
+
 	def can_avoid_indirection(self, var="__rax"):
 		top = self.peek()
 		return self.opt_level >= 1 and isinstance(top, Set) and top.dest == var
-	
+
 	def set_to_rax(self, varname: str):
 		top = self.peek()
 		if self.opt_level >= 1 and hasattr(top, "dest") and top.dest == "__rax":
@@ -232,7 +236,7 @@ class Compiler(c_ast.NodeVisitor):
 			self.curr_function.instructions[-1].dest = varname
 		else:
 			self.push(Set(varname, "__rax"))
-	
+
 	def push_body_jump(self):
 		""" jump over loop/if body when cond is false """
 		if self.opt_level >= 1 and isinstance(self.peek(), BinaryOp):
@@ -242,20 +246,20 @@ class Compiler(c_ast.NodeVisitor):
 				self.push(RelativeJump(None, JumpCondition("==", "__rax", "0")))
 		else:
 			self.push(RelativeJump(None, JumpCondition("==", "__rax", "0")))
-	
+
 	def start_loop(self, cond):
 		self.loops.append(Loop(self.curr_offset() + 1))
 		self.visit(cond)
 		self.push_body_jump()
 		self.loops[-1].end_jumps = [self.curr_offset()]  # also used for breaks
-	
+
 	def end_loop(self):
 		loop = self.loops.pop()
 		self.push(RelativeJump(loop.start, JumpCondition.always))
 		self.loop_end = self.curr_offset() + 1
 		for offset in loop.end_jumps:
 			self.curr_function.instructions[offset].offset = self.loop_end
-	
+
 	def push_ret(self):
 		#TODO make retaddr and local variables use get_special_var and delete_special_var
 		if self.opt_level >= 3 and self.curr_function.name == "main":
@@ -265,7 +269,7 @@ class Compiler(c_ast.NodeVisitor):
 			self.push(End())
 		else:
 			self.push(Return(self.curr_function.name))
-	
+
 	def optimize_builtin_args(self, args):
 		if self.opt_level >= 1:
 			for i, arg in reversed(list(enumerate(args))):
@@ -275,14 +279,14 @@ class Compiler(c_ast.NodeVisitor):
 				else:
 					break
 		return args
-	
+
 	def get_unary_builtin_arg(self, args):
 		self.visit(args[0])
 		if self.can_avoid_indirection():
 			return self.pop().src
 		else:
 			return "__rax"
-	
+
 	def get_binary_builtin_args(self, args, name):
 		left_name = self.get_special_var(f"__{name}_arg0")
 		self.visit(args[0])
@@ -297,7 +301,7 @@ class Compiler(c_ast.NodeVisitor):
 			self.delete_special_var(left)
 			left = self.pop().src
 		return left, right
-	
+
 	def get_multiple_builtin_args(self, args, name):
 		argnames = []
 		for i, arg in enumerate(args):
@@ -306,7 +310,7 @@ class Compiler(c_ast.NodeVisitor):
 			self.set_to_rax(argname)
 			argnames.append(argname)
 		return self.optimize_builtin_args(argnames)
-	
+
 	#visitors
 	def visit_FuncDef(self, node):  # function definitions
 		func_name = node.decl.name
@@ -322,12 +326,20 @@ class Compiler(c_ast.NodeVisitor):
 		self.visit(node.body)
 		#implicit return
 		#needed if loop/if body is at end of function or hasn't returned yet
-		if self.loop_end == self.curr_offset() + 1 or not isinstance(self.peek(), Return):
+		try:
+			last = self.peek()
+		except IndexError:
+			# empty function will still return and wont cause error
 			self.push(Set("__rax", "null"))
 			self.push_ret()
+		else:
+			if self.loop_end == self.curr_offset() + 1 or not isinstance(last, Return):
+				self.push(Set("__rax", "null"))
+				self.push_ret()
+
 		self.functions[func_name] = self.curr_function
 		self.curr_function = None
-	
+
 	def visit_Decl(self, node):
 		if isinstance(node.type, TypeDecl):  # variable declaration
 			#TODO fix local/global split
@@ -358,7 +370,7 @@ class Compiler(c_ast.NodeVisitor):
 			raise NotImplementedError(node)
 		else:
 			raise NotImplementedError(node)
-	
+
 	def visit_Assignment(self, node):
 		self.visit(node.rvalue)
 		varname = self.get_varname(node.lvalue.name)
@@ -372,10 +384,10 @@ class Compiler(c_ast.NodeVisitor):
 				self.push(BinaryOp(varname, varname, "__rax", node.op[:-1]))
 			if self.opt_level < 3:
 				self.push(Set("__rax", varname))
-	
+
 	def visit_Constant(self, node):  # literals
 		self.push(Set("__rax", node.value))
-	
+
 	def visit_ID(self, node):  # identifier
 		varname = node.name
 		if varname not in self.functions:
@@ -385,7 +397,7 @@ class Compiler(c_ast.NodeVisitor):
 		if varname.startswith("_at_"):
 			varname = "@" + varname[4:].replace("_", '-')
 		self.push(Set("__rax", varname))
-	
+
 	def visit_BinaryOp(self, node):
 		if self.opt_level >= 2:
 			new_node = int_constant_fold(node)
@@ -395,7 +407,7 @@ class Compiler(c_ast.NodeVisitor):
 				self.visit(new_node)
 		else:
 			self.visit_BinaryOp_base(node)
-	
+
 	def visit_BinaryOp_base(self, node):
 		self.visit(node.left)
 		left = self.get_special_var("__rbx")
@@ -409,7 +421,7 @@ class Compiler(c_ast.NodeVisitor):
 			left = self.pop().src
 		self.push(BinaryOp("__rax", left, right, node.op))
 		self.delete_special_var(left)
-	
+
 	def visit_UnaryOp(self, node):
 		if node.op == "p++" or node.op == "p--":  #postincrement/decrement
 			varname = self.get_varname(node.expr.name)
@@ -433,19 +445,19 @@ class Compiler(c_ast.NodeVisitor):
 		else:
 			self.visit(node.expr)
 			self.push(UnaryOp("__rax", "__rax", node.op))
-	
+
 	def visit_For(self, node):
 		self.visit(node.init)
 		self.start_loop(node.cond)
 		self.visit(node.stmt)  # loop body
 		self.visit(node.next)
 		self.end_loop()
-	
+
 	def visit_While(self, node):
 		self.start_loop(node.cond)
 		self.visit(node.stmt)
 		self.end_loop()
-	
+
 	def visit_DoWhile(self, node):
 		#jump over the condition on the first iterattion
 		self.push(RelativeJump(None, JumpCondition.always))
@@ -456,7 +468,7 @@ class Compiler(c_ast.NodeVisitor):
 		)
 		self.visit(node.stmt)
 		self.end_loop()
-	
+
 	def visit_If(self, node):
 		self.visit(node.cond)
 		self.push_body_jump()
@@ -474,28 +486,28 @@ class Compiler(c_ast.NodeVisitor):
 			self.curr_function.instructions[cond_jump_offset2].offset = len(
 				self.curr_function.instructions
 			)
-	
+
 	def visit_Break(self, node):  #pylint: disable=unused-argument
 		self.push(RelativeJump(None, JumpCondition.always))
 		self.loops[-1].end_jumps.append(self.curr_offset())
-	
+
 	def visit_Continue(self, node):  #pylint: disable=unused-argument
 		self.push(RelativeJump(self.loops[-1].start, JumpCondition.always))
-	
+
 	def visit_Return(self, node):
 		if node.expr is None:
 			self.push(Set("__rax", "null"))
 		else:
 			self.visit(node.expr)
 		self.push_ret()
-	
+
 	def visit_Label(self, node):
 		self.curr_function.labels[node.name] = self.curr_offset() + 1
 		self.visit(node.stmt)
-	
+
 	def visit_Goto(self, node):
 		self.push(Goto(node.name))
-	
+
 	def visit_FuncCall(self, node):
 		name = node.name.name
 		if node.args is not None:
@@ -509,7 +521,7 @@ class Compiler(c_ast.NodeVisitor):
 			for argname in argnames:
 				if argname.startswith(f"__{name}_arg"):
 					self.delete_special_var(argname)
-		
+
 		elif name == "asm":
 			arg = args[0]
 			if not isinstance(arg, Constant) or arg.type != "string":
@@ -556,7 +568,7 @@ class Compiler(c_ast.NodeVisitor):
 				self.set_to_rax(f"_{param}_{name}")
 			self.push(Set("__retaddr_" + name, self.curr_offset() + 3))
 			self.push(FunctionCall(name))
-	
+
 	def generic_visit(self, node):
 		if isinstance(node, (FileAST, Compound, DeclList)):
 			super().generic_visit(node)

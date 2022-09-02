@@ -12,14 +12,17 @@ def extract_asm(body: c_ast.Compound):
 def get_decl_info(decl: c_ast.Decl):
 	decl_info = decl.type
 	maybe_string = False
+
 	if isinstance(decl_info, c_ast.PtrDecl):
 		maybe_string = True
 		decl_info = decl_info.type
 	name = decl_info.declname
 	datatype = decl_info.type
+
 	if isinstance(datatype, c_ast.Struct):
 		return name, datatype.name
-	elif maybe_string:
+    # splitted elif for better orientation
+	if maybe_string:
 		if datatype.names[0] == 'char':
 			return name, 'string'
 	else:
@@ -29,20 +32,20 @@ class InstructionReader(c_ast.NodeVisitor):
 	def __init__(self):
 		self.funcs = dict()
 		super().__init__()
-	
+
 	def visit_FuncDef(self, node):
 		func_name = node.decl.name
 		record = self.funcs.setdefault(func_name, dict())
 		record['asm'] = extract_asm(node.body)[1:-1]
 		self.parse_func_decl(node.decl.type)
-	
+
 	def parse_func_decl(self, node: c_ast.FuncDecl):
 		return_info = node.type
 		func_name = return_info.declname
 		record = self.funcs.setdefault(func_name, dict())
 		try:
 			record['args'] = tuple(get_decl_info(decl) for decl in node.args.params)
-		
+
 		except AttributeError:
 			record['args'] = tuple()
 

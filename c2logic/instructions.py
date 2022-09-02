@@ -14,7 +14,7 @@ class Set(Instruction):
 	def __init__(self, dest: str, src: str):
 		self.src = src
 		self.dest = dest
-	
+
 	def __str__(self):
 		return f"set {self.dest} {self.src}"
 
@@ -24,10 +24,10 @@ class BinaryOp(Instruction):
 		self.right = right
 		self.op = op
 		self.dest = dest
-	
+
 	def inverse(self):
 		return BinaryOp(self.dest, self.left, self.right, binary_op_inverses[self.op])
-	
+
 	def __str__(self):
 		return f"op {binary_ops[self.op]} {self.dest} {self.left} {self.right}"
 
@@ -36,7 +36,7 @@ class UnaryOp(Instruction):
 		self.src = src
 		self.dest = dest
 		self.op = op
-	
+
 	def __str__(self):
 		return f"op {unary_ops[self.op]} {self.dest} {self.src} 0"
 
@@ -45,13 +45,13 @@ class JumpCondition:
 	op: str
 	left: str
 	right: str
-	
+
 	@classmethod
 	def from_binaryop(cls, binop: BinaryOp):
 		return cls(binop.op, binop.left, binop.right)
-	
+
 	always: "JumpCondition" = None
-	
+
 	def __str__(self):
 		return f"{condition_ops[self.op]} {self.left} {self.right}"
 
@@ -62,7 +62,7 @@ class RelativeJump(Instruction):
 		self.offset = offset
 		self.func_start: int = None
 		self.cond = cond
-	
+
 	def __str__(self):
 		return f"jump {self.func_start + self.offset} {self.cond}"
 
@@ -70,14 +70,14 @@ class FunctionCall(Instruction):
 	def __init__(self, func_name: str):
 		self.func_name = func_name
 		self.func_start: int = None
-	
+
 	def __str__(self):
 		return f"jump {self.func_start} {JumpCondition.always}"
 
 class Return(Instruction):
 	def __init__(self, func_name: str):
 		self.func_name = func_name
-	
+
 	def __str__(self):
 		return f"set @counter __retaddr_{self.func_name}"
 
@@ -86,7 +86,7 @@ class Goto(Instruction):
 		self.label = label
 		self.offset: int = None
 		self.func_start: int = None
-	
+
 	def __str__(self):
 		return f"jump {self.func_start + self.offset} {JumpCondition.always}"
 
@@ -97,28 +97,31 @@ class End(Instruction):
 class RawAsm(Instruction):
 	def __init__(self, code: str):
 		self.code = code
-	
+
 	def __str__(self):
 		return self.code
 
 class ParsedInstruction(Instruction):
 	def __str__(self):
 		unescaped = self.assembly_string.replace('\\', '')
-		return unescaped.format(**self.__dict__)
+		try:
+			return unescaped.format(**self.__dict__)
+		except KeyError:
+			raise Exception(f"Missing argument/s of function \"{unescaped}\"")
 
 class ParsedInstructionFactory():
 	RETURN_REGISTER = "__rax"
-	
+
 	def __init__(self, name, argn, argt, assembly_string):
 		self.argn = argn
 		self.argt = argt
 		self.name = name
 		self.assembly_string = assembly_string
-	
+
 	@property
 	def returns_data(self):
 		return "{dest}" in self.assembly_string
-	
+
 	def __call__(self, *args):
 		ret_instruction = ParsedInstruction()
 		ret_instruction.argt = self.argt

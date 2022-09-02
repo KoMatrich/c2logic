@@ -10,3 +10,5 @@ compile_flags.txt
 /build/
 /dist/
 /include/G*
+examples/test.c
+examples/test.mlog
